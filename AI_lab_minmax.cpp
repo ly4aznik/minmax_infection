@@ -4,14 +4,25 @@
 #include <iostream>
 #include <string>
 #include <unordered_set>
+#include <unordered_map>
+#include <chrono>
+#include <algorithm>
+#include <random>
+
 
 using namespace std;
+using namespace std::chrono;
+
 vector<int> moves;
 
 int boardSize = 6;
 char playerChar;
 char botChar;
 
+int countPoints(const string& state)
+{
+    return count(state.cbegin(), state.cend(), botChar) - count(state.cbegin(), state.cend(), playerChar);
+}
 
 
 struct Node
@@ -19,12 +30,15 @@ struct Node
     string state;
     int8_t value;
 	Node(string newState, int newValue) : state(newState), value(newValue) {}
+	Node(string newState) : state(newState), value(countPoints(newState)) {}
 
 };
+bool compareNodes(const Node& a, const Node& b) {
+    return a.value < b.value; // Сортируем по возрастанию
+}
 
-int countPoints(const string& state)
-{
-    return count(state.cbegin(), state.cend(), botChar) - count(state.cbegin(), state.cend(), playerChar);
+void sortChilds(std::vector<Node>& childs) {
+    sort(childs.begin(), childs.end(), compareNodes);
 }
 
 bool isValid(int x, int y) {
@@ -126,6 +140,7 @@ vector<Node> getChilds(int index, Node& parent, bool isMaximizing) {
             }
         }
     }
+    sortChilds(childs);
     return childs;
 }
 
@@ -156,7 +171,7 @@ ostream& operator<<(ostream& os, const Node& node) {
     return os;
 }
 
-Node minimax(int depth, Node& node, bool isMaximizing, int alpha, int beta, unordered_set<string>& checked) {
+Node minimax(int depth, Node& node, bool isMaximizing, int alpha, int beta, unordered_map<string, pair<string, int>>& checked) {
     if (depth == 0) {
         return node;
     }
@@ -168,9 +183,37 @@ Node minimax(int depth, Node& node, bool isMaximizing, int alpha, int beta, unor
                 vector<Node> childs = getChilds(i, node, isMaximizing);
                 for (Node& child : childs) {
                     if (checked.find(child.state) == checked.end()) {
-                        checked.insert(child.state);
+                        checked[child.state] = { child.state , depth };
                         Node evalNode = minimax(depth - 1, child, false, alpha, beta, checked);
+                        checked[child.state] = { evalNode.state , depth - 1 };
                         int eval = evalNode.value;
+                        if (eval >= maxEval) {
+
+                            maxEval = eval;
+                            bestNode = child;
+
+                        }
+                        alpha = max(alpha, eval);
+                        if (beta <= alpha)
+                            break;
+                    }
+                    else if (depth > checked[child.state].second ) {
+                        Node evalNode = minimax(depth - 1, child, false, alpha, beta, checked);
+                        checked[child.state] = { evalNode.state , depth - 1 };
+                        int eval = evalNode.value;
+                        if (eval >= maxEval) {
+
+                            maxEval = eval;
+                            bestNode = child;
+
+                        }
+                        alpha = max(alpha, eval);
+                        if (beta <= alpha)
+                            break;
+                    }
+                    else
+                    {
+                        int eval = countPoints(checked[child.state].first);
                         if (eval >= maxEval) {
 
                             maxEval = eval;
@@ -193,13 +236,41 @@ Node minimax(int depth, Node& node, bool isMaximizing, int alpha, int beta, unor
                 vector<Node> childs = getChilds(i, node, isMaximizing);
                 for (Node& child : childs) {
                     if (checked.find(child.state) == checked.end()) {
-                        checked.insert(child.state);
+                        checked[child.state] = { child.state , depth };
                         Node evalNode = minimax(depth - 1, child, true, alpha, beta, checked);
+                        checked[child.state] = { evalNode.state , depth - 1 };
                         int eval = evalNode.value;
                         if (eval <= minEval) {
 ;
                             minEval = eval;
-                            //bestNode = &child; // Сохраняем ссылку на лучший узел
+                            bestNode = child;
+
+                        }
+                        beta = min(beta, eval);
+                        if (beta <= alpha)
+                            break;
+                    }
+                    else if (depth > checked[child.state].second) {
+                        checked[child.state] = { child.state , depth };
+                        Node evalNode = minimax(depth - 1, child, true, alpha, beta, checked);
+                        checked[child.state] = { evalNode.state , depth - 1 };
+                        int eval = evalNode.value;
+                        if (eval <= minEval) {
+                            
+                            minEval = eval;
+                            bestNode = child;
+
+                        }
+                        beta = min(beta, eval);
+                        if (beta <= alpha)
+                            break;
+                    }
+                    else
+                    {
+                        int eval = countPoints(checked[child.state].first);
+                        if (eval <= minEval) {
+
+                            minEval = eval;
                             bestNode = child;
 
                         }
@@ -370,6 +441,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+
+
     // Последний аргумент командной строки - цвет, которым играет бот (0 или 1)
     int botColor = stoi(argv[argc - 1]);  // 0 для 'X', 1 для 'O'
     bool isMaximizing = (botColor == 0);  // true, если бот играет за 'O', false — за 'X'
@@ -378,25 +451,68 @@ int main(int argc, char* argv[]) {
 
     string startState = "X....O........................O....X";  // Начальное состояние поля
     Node root(startState, countPoints(startState));
-    unordered_set<string> checked;
+    unordered_map<string, pair<string, int>> checked;
     printBoard(root.state);  // Печать начальной доски
 
     //int depth = stoi(argv[argc - 2]);  // Глубина поиска
-    int depth;
+    int depth = 5;
+    bool memory = false;
+    bool random = false;
     for (int i = 1; i < argc; ++i) {
         string arg = argv[i];
         if (arg == "-d" && i + 1 < argc) {  // Проверяем, что есть аргумент после флага -d
             depth = stoi(argv[i + 1]);
-            i++;  // Пропускаем значение глубины
+            i++;
+        }
+        if (arg == "-m" && i + 1 < argc) {  // Проверяем, что есть аргумент после флага -m
+            memory = (bool)stoi(argv[i + 1]);
+            i++;
+        }
+        if (arg == "-r" && i + 1 < argc) {  // Проверяем, что есть аргумент после флага -m
+            random = (bool)stoi(argv[i + 1]);
+            i++;
         }
     }
+
+    double totalTimeSpent = 0.0;
+    vector<string> moveHistory; // Вектор для хранения истории ходов
+    random_device rd;
+    mt19937 gen(rd());
+    uniform_int_distribution<int> dis(0, 25);
+
+
     while (true) {
         try {
             if (isMaximizing) {
                 // Ход бота
-                cout << "Calculating turn..." << endl;
-                Node bestMove = minimax(depth, root, isMaximizing, -1000, 1000, checked);
+                cout << "Calculating turn... ";
+                auto start = high_resolution_clock::now();
+                Node bestMove = root;
+                if (random)
+                {
 
+                    vector<int> indexes;
+                    for (size_t i = 0; i < root.state.size(); i++)
+                    {
+                        if (root.state[i] == botChar)
+                        {
+							indexes.push_back(i);
+                        }
+                    }
+
+					int randomIndex = indexes[dis(gen) % indexes.size()];
+					vector<Node> childs = getChilds(randomIndex, root, isMaximizing);
+					bestMove = childs[rand() % childs.size()];
+                }
+                else
+                {
+                    bestMove = minimax(depth, root, isMaximizing, -1000, 1000, checked);
+                }
+                auto end = high_resolution_clock::now();
+                duration<double> timeTaken = duration_cast<duration<double>>(end - start);
+                cout << "Time spent: " << timeTaken.count() << " sec." << "(Memory " << (memory ? "On" : "Off") << ")" << endl;
+
+                totalTimeSpent += timeTaken.count();  // Добавляем время, затраченное на ход
                 // Находим, какой именно ход был сделан
                 pair<int, int> oldPos, newPos;
                 findMove(root.state, bestMove.state, botChar, oldPos, newPos);
@@ -409,17 +525,38 @@ int main(int argc, char* argv[]) {
                 cerr << oldPosition << " " << newPosition << endl;
 
                 // Обновляем состояние доски
+                //moveHistory.push_back(root.state);
                 root.state = bestMove.state;
                 printBoard(root.state);
                 isMaximizing = false;  // Передаем ход сопернику
-                checked.clear();
+                if (!memory)
+                {
+                    checked.clear();
+                }
             }
             else {
+                startTurn:
                 cout << "Enter turn..." << endl;
                 // Ход соперника
                 string oldPosition;
                 string newPosition;
-                cin >> oldPosition >> newPosition;  // Чтение хода соперника через stdin
+                auto start = high_resolution_clock::now();
+                cin >> oldPosition;  // Чтение хода соперника через stdin
+
+                if (oldPosition == "u1") { // Проверка на команду u1
+                    if (!moveHistory.empty()) {
+                        root.state = moveHistory.back(); // Возвращаем последнее состояние
+                        moveHistory.pop_back(); // Убираем последнее состояние из истории
+                        cout << "Последний ход отменен." << endl;
+                        printBoard(root.state);
+                        isMaximizing = true; // Возвращаем ход боту
+                    }
+                    else {
+                        cout << "Нет ходов для отмены." << endl;
+                    }
+                    goto startTurn; // Пропускаем итерацию цикла
+                }
+                cin >> newPosition;
 
                 int x = oldPosition[0] - 'a';  // Столбец от 'a'
                 int y = oldPosition[1] - '1';  // Строка от '1'
@@ -436,6 +573,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Обновляем состояние доски после хода соперника
+                moveHistory.push_back(root.state);
                 if (abs(x - newX) == 2 || abs(y - newY) == 2) {
                     root.state[oldIndex] = '.';
                 }
@@ -449,6 +587,9 @@ int main(int argc, char* argv[]) {
             // Проверка окончания игры
             if (!canMakeMove(root.state, isMaximizing)) {
                 cout << "Game over!" << endl;
+
+                cout << "Time spent on calculating in total: " << totalTimeSpent << " sec." << "(Memory " << (memory ? "On" : "Off") << ")" << endl;
+
                 if (countPoints(root.state) > 0) {
                     return  0;
                 }
